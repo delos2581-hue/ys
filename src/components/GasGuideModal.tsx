@@ -42,24 +42,32 @@ const DEFAULT_UNITS = [
 function setupInitialSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let userSheet = ss.getSheetByName('Users') || ss.insertSheet('Users');
-  userSheet.clear();
-  userSheet.appendRow(['ID', 'Password', 'Role']);
-  userSheet.appendRow(['admin', 'admin1234', 'admin']);
-  DEFAULT_UNITS.forEach(function(unit) {
-    userSheet.appendRow([unit, unit, 'resident']);
-  });
+  if (userSheet.getLastRow() === 0) {
+    userSheet.appendRow(['ID', 'Password', 'Role']);
+    userSheet.appendRow(['admin', 'admin1234', 'admin']);
+    DEFAULT_UNITS.forEach(function(unit) { userSheet.appendRow([unit, unit, 'resident']); });
+  }
 
   let meterSheet = ss.getSheetByName('MeterData') || ss.insertSheet('MeterData');
-  if (meterSheet.getLastRow() === 0) {
-    meterSheet.appendRow(['YearMonth', 'Unit', 'Value', 'UpdatedAt']);
-  }
+  if (meterSheet.getLastRow() === 0) meterSheet.appendRow(['YearMonth', 'Unit', 'Value', 'UpdatedAt']);
 
   let billingSheet = ss.getSheetByName('BillingHistory') || ss.insertSheet('BillingHistory');
-  if (billingSheet.getLastRow() === 0) {
-    billingSheet.appendRow(['YearMonth', 'TotalBill', 'TotalUsage', 'CommonElectric', 'ManagerName', 'AccountInfo']);
-  }
+  if (billingSheet.getLastRow() === 0) billingSheet.appendRow(['YearMonth', 'TotalBill', 'TotalUsage', 'CommonElectric', 'ManagerName', 'AccountInfo']);
   Logger.log('초기 설정 완료!');
   return { success: true, message: '초기 시트가 생성되었습니다.' };
+}
+
+// 2026년 6월 둔지빌 실제 청구분 데이터 세팅 함수 (고지서 353,730원/279톤/권경희 총무 및 10세대 수치)
+function setupJune2026Data() {
+  setupInitialSheets();
+  saveBillingInfo('2026-06', 353730, 279, 3590, '권경희', '부산은행 320 12 004078 6');
+  const april = [{unit:'101호',value:3273},{unit:'102호',value:2606},{unit:'103호',value:1389},{unit:'104호',value:2708},{unit:'105호',value:456},{unit:'201호',value:2185},{unit:'202호',value:271},{unit:'203호',value:2348},{unit:'204호',value:2414},{unit:'205호',value:1071}];
+  const may = [{unit:'101호',value:3301},{unit:'102호',value:2628},{unit:'103호',value:1399},{unit:'104호',value:2728},{unit:'105호',value:490},{unit:'201호',value:2207},{unit:'202호',value:295},{unit:'203호',value:2371},{unit:'204호',value:2428},{unit:'205호',value:1089}];
+  const june = [{unit:'101호',value:3329},{unit:'102호',value:2653},{unit:'103호',value:1411},{unit:'104호',value:2748},{unit:'105호',value:534},{unit:'201호',value:2232},{unit:'202호',value:322},{unit:'203호',value:2395},{unit:'204호',value:2440},{unit:'205호',value:1102}];
+  saveBatchMeterValues('2026-04', april);
+  saveBatchMeterValues('2026-05', may);
+  saveBatchMeterValues('2026-06', june);
+  return { success: true, message: '2026년 6월 둔지빌 실데이터가 성공적으로 세팅되었습니다.' };
 }
 
 function doGet(e) {
@@ -67,13 +75,10 @@ function doGet(e) {
     const params = (e && e.parameter) ? e.parameter : {};
     const action = params.action || 'ping';
     let result;
-    if (action === 'ping') {
-      result = { success: true, message: 'Apps Script API가 정상 작동 중입니다.' };
-    } else if (action === 'getSettlementData') {
-      result = getSettlementData(params.yearMonth, params.unit);
-    } else {
-      result = { success: false, error: 'Unknown action' };
-    }
+    if (action === 'ping') result = { success: true, message: 'Apps Script API 정상 작동 중' };
+    else if (action === 'getSettlementData') result = getSettlementData(params.yearMonth, params.unit);
+    else if (action === 'setupJune2026Data') result = setupJune2026Data();
+    else result = { success: false, error: 'Unknown action' };
     return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ success: false, error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
@@ -98,6 +103,7 @@ function doPost(e) {
     else if (action === 'saveBillingInfo') result = saveBillingInfo(payload.yearMonth, payload.totalBill, payload.totalUsage, payload.commonElectric, payload.managerName, payload.accountInfo);
     else if (action === 'getSettlementData') result = getSettlementData(payload.yearMonth, payload.unit);
     else if (action === 'setupInitialSheets') result = setupInitialSheets();
+    else if (action === 'setupJune2026Data') result = setupJune2026Data();
     else result = { success: false, error: 'Unknown POST action: ' + action };
 
     return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);

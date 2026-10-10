@@ -298,8 +298,25 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
           </div>
         </div>
 
-        {/* 청구월 선택 & 새로고침 */}
-        <div className="flex items-center gap-2">
+        {/* 청구월 선택 & 실데이터 세팅 버튼 & 새로고침 */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={async () => {
+              if (window.confirm('첨부 이미지의 2026년 6월 둔지빌 실데이터(수도 353,730원, 279톤, 총무 권경희, 10세대 실측값)로 세팅하시겠습니까?')) {
+                const res = await Api.setupJune2026Data();
+                alert(res.message);
+                setSelectedYM('2026-06');
+                await loadSettlement('2026-06');
+              }
+            }}
+            className="px-2.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center gap-1.5 border border-indigo-400/40"
+            title="첨부 이미지의 둔지빌 2026년 6월 실제 고지서 및 10세대 계량기 수치 자동 반영"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>6월 둔지빌 실데이터 세팅</span>
+          </button>
+
           <span className="text-xs text-slate-300 font-medium">청구 연월:</span>
           <select
             value={selectedYM}
@@ -524,6 +541,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                     <th className="py-3 px-2 text-right font-semibold">
                       수도요금
                     </th>
+                    {Boolean(settlementData?.errorDiffUsage && settlementData.errorDiffUsage > 0) && (
+                      <th className="py-3 px-2 text-right font-bold text-amber-700 bg-amber-50/50">
+                        오차납부금 ({settlementData?.errorDiffUsage}톤분)
+                      </th>
+                    )}
                     <th className="py-3 px-2 text-right font-semibold">
                       정액료(219원)
                     </th>
@@ -555,6 +577,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                       <td className="py-3 px-2 text-right text-slate-700">
                         {item.waterFee.toLocaleString()} 원
                       </td>
+                      {Boolean(settlementData?.errorDiffUsage && settlementData.errorDiffUsage > 0) && (
+                        <td className="py-3 px-2 text-right text-amber-800 font-bold bg-amber-50/30">
+                          {(item.errorDiffFee || 0).toLocaleString()} 원
+                        </td>
+                      )}
                       <td className="py-3 px-2 text-right text-slate-500">
                         {item.fixedFee.toLocaleString()} 원
                       </td>
@@ -604,6 +631,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                     <td className="py-3 px-2 text-right text-slate-800">
                       {settlementData?.summary.sumWaterFee.toLocaleString()} 원
                     </td>
+                    {Boolean(settlementData?.errorDiffUsage && settlementData.errorDiffUsage > 0) && (
+                      <td className="py-3 px-2 text-right text-amber-800 font-black bg-amber-50/50">
+                        {(settlementData?.summary.sumErrorDiffFee || settlementData?.errorDiffFeeTotal || 0).toLocaleString()} 원
+                      </td>
+                    )}
                     <td className="py-3 px-2 text-right text-slate-800">
                       {(settlementData?.fixedFeeTotal || 2190).toLocaleString()} 원
                     </td>
@@ -1044,6 +1076,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
                   <span className="text-slate-600">공용 전기료 (1/10)</span>
                   <span className="font-semibold">{previewSingle.commonElectricFee.toLocaleString()} 원</span>
                 </div>
+                {Boolean(previewSingle.errorDiffFee && previewSingle.errorDiffFee > 0) && (
+                  <div className="flex justify-between py-1 text-amber-800 font-bold bg-amber-50 px-2 rounded">
+                    <span>오차 톤수 배분액 ({settlementData?.errorDiffUsage}톤분)</span>
+                    <span>+{(previewSingle.errorDiffFee || 0).toLocaleString()} 원</span>
+                  </div>
+                )}
                 <div className="pt-2 border-t-2 border-slate-300 flex justify-between items-center text-sm font-black text-slate-900">
                   <span>최종 납부 총액</span>
                   <span className="text-lg text-blue-600">{previewSingle.finalAmount.toLocaleString()} 원</span>

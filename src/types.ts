@@ -35,7 +35,8 @@ export interface SettlementItem {
   waterFee: number;           // usage * unitPrice
   fixedFee: number;           // 219원 (2,190원 / 10)
   commonElectricFee: number;  // commonElectric / 10
-  finalAmount: number;        // waterFee + fixedFee + commonElectricFee
+  errorDiffFee?: number;      // 오차납부금 (고지서 톤수 오차분 안분 배분액)
+  finalAmount: number;        // waterFee + fixedFee + commonElectricFee + errorDiffFee
   isComplete: boolean;
 }
 
@@ -44,6 +45,7 @@ export interface SettlementSummary {
   completedUnits: number;
   sumUsage: number;
   sumWaterFee: number;
+  sumErrorDiffFee?: number;
   sumFinalTotal: number;
 }
 
@@ -61,6 +63,8 @@ export interface SettlementData {
   fixedFeeTotal: number;
   fixedFeePerUnit: number;
   commonElectricPerUnit: number;
+  errorDiffUsage?: number;
+  errorDiffFeeTotal?: number;
   settlements: SettlementItem[];
   singleResult?: SettlementItem | null;
   summary: SettlementSummary;

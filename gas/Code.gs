@@ -6,13 +6,14 @@
  * [시스템 개요]
  * - 세대별 10개 호수 (101호~105호, 201호~205호) 및 관리자(admin)
  * - 매월 5일 계량기 수치 측정 및 저장
- * - 수도요금 청구 주기: 지지난달 5일 수치 ~ 지난달 5일 수치 (예: 6월 고지서 = 4월~5월 사용량)
+ * - 수도요금 청구 주기: 지지난달 5일 수치 ~ 지난달 5일 수치 (예: 6월 고지서 = 4월 5일 ~ 5월 5일 사용량)
  * - 수도 정액료 총액: 2,190원 (세대당 219원 균등 분할)
  * - 1톤당 단가 = (고지서 전체 수도요금 - 2,190원) / 고지서 전체 사용량(톤)
- * - 세대별 수도요금 = 사용량(톤) × 1톤당 단가
- * - 세대별 공용전기료 = 고지서 전체 공용전기료 / 10
- * - 세대별 최종 납부금액 = 세대별 수도요금 + 정액료(219원) + 세대별 공용전기료
- * - 총무 관리: 고지서 입력 시 총무 이름 및 입금 계좌정보 관리
+ * - 세대별 기본 수도요금 = 사용량(톤) × 1톤당 단가
+ * - 오차 납부금 = (고지서 총사용량 - 세대합계 사용량) × 단가 × (세대사용량 / 세대합계사용량)
+ * - 세대별 공용전기료 = 고지서 전체 공용전기료 / 10 (1/N 균등 분할)
+ * - 세대별 최종 납부금액 = 세대별 수도요금 + 수도정액료(219원) + 공용전기료 + 오차납부금
+ * - 총무 관리: 고지서 입력 시 총무 이름과 입금 계좌정보 저장 및 관리
  * 
  * [시트 구성]
  * - Users: [ID, Password, Role]
@@ -25,11 +26,90 @@ const FIXED_WATER_FEE_TOTAL = 2190;
 const TOTAL_UNITS = 10;
 const FIXED_WATER_FEE_PER_UNIT = 219; // 2190 / 10
 
-// 기본 호수 목록
+// 둔지빌 10개 호수 목록
 const DEFAULT_UNITS = [
   '101호', '102호', '103호', '104호', '105호',
   '201호', '202호', '203호', '204호', '205호'
 ];
+
+/**
+ * ★ [핵심 추가] 2026년 6월 청구분(둔지빌 4월 사용 및 5월 공용전기) 실제 데이터 자동 세팅 함수
+ * Apps Script 편집기 상단 함수 목록에서 'setupJune2026Data'를 선택하고 [실행]을 누르면 
+ * 구글 시트에 고지서와 10개 세대의 실제 수치가 1초 만에 완벽하게 세팅됩니다!
+ */
+function setupJune2026Data() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1) 초기 시트(Users, MeterData, BillingHistory) 점검 및 생성
+  setupInitialSheets();
+
+  // 2) 2026-06 고지서 및 총무 정보 등록 (첨부 이미지 기준)
+  // - 수도요금(정액+상수+하수): 353,730원 (상수도 152,850원 + 하수도 200,880원)
+  // - 고지서 총 사용량: 279톤 (1톤당 단가 1,260원)
+  // - 공용전기요금: 3,590원 (세대당 359원)
+  // - 총무: 권경희
+  // - 계좌정보: 부산은행 320 12 004078 6
+  saveBillingInfo(
+    '2026-06',
+    353730,
+    279,
+    3590,
+    '권경희',
+    '부산은행 320 12 004078 6'
+  );
+
+  // 3) 4월 05일 측정값 (지지난달, 둔지빌 10세대 합계: 18,721)
+  const aprilData = [
+    { unit: '101호', value: 3273 },
+    { unit: '102호', value: 2606 },
+    { unit: '103호', value: 1389 },
+    { unit: '104호', value: 2708 },
+    { unit: '105호', value: 456 },
+    { unit: '201호', value: 2185 },
+    { unit: '202호', value: 271 },
+    { unit: '203호', value: 2348 },
+    { unit: '204호', value: 2414 },
+    { unit: '205호', value: 1071 }
+  ];
+
+  // 4) 5월 05일 측정값 (지난달, 둔지빌 10세대 합계: 18,936 / 당월사용량 합계: 215톤)
+  const mayData = [
+    { unit: '101호', value: 3301 }, // 사용량: 28톤
+    { unit: '102호', value: 2628 }, // 사용량: 22톤
+    { unit: '103호', value: 1399 }, // 사용량: 10톤
+    { unit: '104호', value: 2728 }, // 사용량: 20톤
+    { unit: '105호', value: 490 },  // 사용량: 34톤
+    { unit: '201호', value: 2207 }, // 사용량: 22톤
+    { unit: '202호', value: 295 },  // 사용량: 24톤
+    { unit: '203호', value: 2371 }, // 사용량: 23톤
+    { unit: '204호', value: 2428 }, // 사용량: 14톤
+    { unit: '205호', value: 1089 }  // 사용량: 18톤
+  ];
+
+  // 5) 6월 05일 측정값 (익월사용량, 둔지빌 10세대 합계: 19,166)
+  const juneData = [
+    { unit: '101호', value: 3329 },
+    { unit: '102호', value: 2653 },
+    { unit: '103호', value: 1411 },
+    { unit: '104호', value: 2748 },
+    { unit: '105호', value: 534 },
+    { unit: '201호', value: 2232 },
+    { unit: '202호', value: 322 },
+    { unit: '203호', value: 2395 },
+    { unit: '204호', value: 2440 },
+    { unit: '205호', value: 1102 }
+  ];
+
+  saveBatchMeterValues('2026-04', aprilData);
+  saveBatchMeterValues('2026-05', mayData);
+  saveBatchMeterValues('2026-06', juneData);
+
+  Logger.log('2026년 6월 둔지빌 청구분 실데이터 세팅 완료!');
+  return {
+    success: true,
+    message: '2026년 6월 둔지빌 청구분 고지서(353,730원, 279톤, 단가 1,260원, 총무 권경희) 및 10개 세대 계량기 수치가 성공적으로 세팅되었습니다.'
+  };
+}
 
 /**
  * 1. 초기 시트 및 기본 데이터 세팅
@@ -43,16 +123,13 @@ function setupInitialSheets() {
   if (!userSheet) {
     userSheet = ss.insertSheet('Users');
   }
-  userSheet.clear();
-  userSheet.appendRow(['ID', 'Password', 'Role']);
-  
-  // 관리자 계정 추가
-  userSheet.appendRow(['admin', 'admin1234', 'admin']);
-  
-  // 10개 세대 초기 계정 추가 (초기 ID: 호수, 초기 PW: 호수)
-  DEFAULT_UNITS.forEach(function(unit) {
-    userSheet.appendRow([unit, unit, 'resident']);
-  });
+  if (userSheet.getLastRow() === 0) {
+    userSheet.appendRow(['ID', 'Password', 'Role']);
+    userSheet.appendRow(['admin', 'admin1234', 'admin']);
+    DEFAULT_UNITS.forEach(function(unit) {
+      userSheet.appendRow([unit, unit, 'resident']);
+    });
+  }
 
   // 2) MeterData 시트
   let meterSheet = ss.getSheetByName('MeterData');
@@ -72,14 +149,14 @@ function setupInitialSheets() {
     billingSheet.appendRow(['YearMonth', 'TotalBill', 'TotalUsage', 'CommonElectric', 'ManagerName', 'AccountInfo']);
   }
 
-  // 기본 시트(Sheet1 등)가 남아있다면 정리 (선택사항)
+  // 기본 시트(Sheet1 등) 정리 (선택사항)
   const defaultSheet = ss.getSheetByName('시트1') || ss.getSheetByName('Sheet1');
   if (defaultSheet && ss.getSheets().length > 3) {
     try { ss.deleteSheet(defaultSheet); } catch(e) {}
   }
 
-  Logger.log('초기 시트 설정이 완료되었습니다!');
-  return { success: true, message: '초기 시트 및 기본 사용자 계정이 성공적으로 생성되었습니다.' };
+  Logger.log('초기 시트 설정 완료!');
+  return { success: true, message: '초기 시트 및 기본 사용자 계정이 준비되었습니다.' };
 }
 
 /**
@@ -109,6 +186,9 @@ function doGet(e) {
         break;
       case 'getMeterHistory':
         result = getMeterHistory(params.unit, params.yearMonth);
+        break;
+      case 'setupJune2026Data':
+        result = setupJune2026Data();
         break;
       default:
         result = { success: false, error: '알 수 없는 요청 action 입니다: ' + action };
@@ -175,6 +255,9 @@ function doPost(e) {
       case 'setupInitialSheets':
         result = setupInitialSheets();
         break;
+      case 'setupJune2026Data':
+        result = setupJune2026Data();
+        break;
       default:
         result = { success: false, error: '유효하지 않은 action 요청입니다: ' + action };
     }
@@ -204,7 +287,6 @@ function login(id, password) {
   }
 
   const data = sheet.getDataRange().getValues();
-  // 1행은 헤더 (ID, Password, Role)
   for (let i = 1; i < data.length; i++) {
     const rowId = String(data[i][0]).trim();
     const rowPw = String(data[i][1]).trim();
@@ -262,7 +344,6 @@ function changePassword(id, oldPassword, newPassword) {
  * 4. 세대별 비밀번호 초기화 (관리자 권한: 해당 호수 이름으로 리셋)
  */
 function resetUserPassword(adminId, adminPassword, targetUnit) {
-  // 관리자 인증
   const auth = login(adminId, adminPassword);
   if (!auth.success || auth.user.role !== 'admin') {
     return { success: false, message: '관리자 권한이 없거나 관리자 비밀번호가 일치하지 않습니다.' };
@@ -276,7 +357,6 @@ function resetUserPassword(adminId, adminPassword, targetUnit) {
   for (let i = 1; i < data.length; i++) {
     const rowId = String(data[i][0]).trim();
     if (rowId === String(targetUnit).trim()) {
-      // 초기 비밀번호는 해당 호수명으로 리셋
       sheet.getRange(i + 1, 2).setValue(targetUnit);
       return { success: true, message: targetUnit + '의 비밀번호가 "' + targetUnit + '"(호수명)으로 초기화되었습니다.' };
     }
@@ -286,8 +366,7 @@ function resetUserPassword(adminId, adminPassword, targetUnit) {
 }
 
 /**
- * 5. 계량기 수치 저장 (당월 5일 측정값)
- * [YearMonth, Unit, Value, UpdatedAt]
+ * 5. 단일 계량기 수치 저장 (당월 5일 측정값)
  */
 function saveMeterValue(unit, yearMonth, value) {
   if (!unit || !yearMonth || value === undefined || value === null || value === '') {
@@ -307,17 +386,14 @@ function saveMeterValue(unit, yearMonth, value) {
   }
 
   const data = sheet.getDataRange().getValues();
-  const formattedYM = String(yearMonth).trim(); // YYYY-MM
+  const formattedYM = String(yearMonth).trim();
   const formattedUnit = String(unit).trim();
   const now = new Date();
   const updatedAt = Utilities.formatDate(now, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
 
-  // 기존 해당 월/호수 데이터가 있으면 업데이트, 없으면 신규 추가
   let foundRow = -1;
   for (let i = 1; i < data.length; i++) {
-    const rowYM = String(data[i][0]).trim();
-    const rowUnit = String(data[i][1]).trim();
-    if (rowYM === formattedYM && rowUnit === formattedUnit) {
+    if (String(data[i][0]).trim() === formattedYM && String(data[i][1]).trim() === formattedUnit) {
       foundRow = i + 1;
       break;
     }
@@ -342,7 +418,7 @@ function saveMeterValue(unit, yearMonth, value) {
 
 /**
  * 5-1. 10세대 계량기 수치 일괄 저장 (총무 전용 한꺼번에 입력 기능)
- * items: [{ unit: '101호', value: 334.8 }, ...]
+ * items: [{ unit: '101호', value: 3301 }, ...]
  */
 function saveBatchMeterValues(yearMonth, items) {
   if (!yearMonth || !items || !items.length) {
@@ -361,7 +437,6 @@ function saveBatchMeterValues(yearMonth, items) {
   const now = new Date();
   const updatedAt = Utilities.formatDate(now, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
 
-  // 빠른 수정을 위한 맵 (unit => row index)
   const existingRows = {};
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === formattedYM) {
@@ -456,15 +531,14 @@ function saveBillingInfo(yearMonth, totalBill, totalUsage, commonElectric, manag
 /**
  * 7. 정산 데이터 계산 및 조회
  * 
- * [청구 주기 원칙]
+ * [청구 주기 및 계산 원칙]
  * 청구월이 yearMonth (예: 2026-06)일 때:
- * - 지난달(M-1) 측정값 (예: 2026-05)
- * - 지지난달(M-2) 측정값 (예: 2026-04)
- * - 사용량 = 지난달 - 지지난달
- * - 단가 = (전체 수도요금 - 2190) / 전체 사용량
- * - 세대별 수도요금 = 사용량 × 단가
- * - 세대별 공용전기 = 전체 공용전기 / 10
- * - 세대별 최종납부액 = 세대별 수도요금 + 219 + 세대별 공용전기
+ * - 지난달(M-1) 측정값 (2026-05) - 지지난달(M-2) 측정값 (2026-04) = 세대별 사용량
+ * - 1톤당 단가 = (고지서 전체 수도요금 - 2,190원) / 고지서 전체 사용량(톤)
+ * - 세대별 기본 수도요금 = 세대별 사용량 × 1톤당 단가
+ * - 오차 납부금 = (고지서 총사용량 - 둔지빌 세대합계) × 단가 × (세대사용량 / 세대총사용량)
+ * - 세대별 공용전기료 = 고지서 전체 공용전기료 / 10
+ * - 세대별 최종 납부총액 = 세대별 수도요금 + 오차납부금 + 수도정액료(219원) + 공용전기료
  */
 function getSettlementData(yearMonth, targetUnit) {
   if (!yearMonth) {
@@ -505,18 +579,18 @@ function getSettlementData(yearMonth, targetUnit) {
     }
   }
 
-  // 단가 계산: (고지서 전체 수도요금 - 2,190원) / 고지서 전체 사용량(톤)
+  // 1톤당 단가: (고지서 전체 수도요금 - 2,190원) / 고지서 전체 사용량(톤)
   let unitPrice = 0;
   if (billing.totalUsage > 0 && billing.totalBill > FIXED_WATER_FEE_TOTAL) {
     unitPrice = (billing.totalBill - FIXED_WATER_FEE_TOTAL) / billing.totalUsage;
   }
 
-  // 세대별 공용전기료 = 고지서 전체 공용전기료 / 10
+  // 세대별 공용전기료: 전체 공용전기료 / 10
   const commonElectricPerUnit = Math.round(billing.commonElectric / TOTAL_UNITS);
 
   // 2) 계량기 데이터 조회
   const meterSheet = ss.getSheetByName('MeterData');
-  const meterMap = {}; // key: "unit_YYYY-MM" => value
+  const meterMap = {};
 
   if (meterSheet) {
     const mData = meterSheet.getDataRange().getValues();
@@ -528,10 +602,28 @@ function getSettlementData(yearMonth, targetUnit) {
     }
   }
 
+  // 세대별 실사용량 합계 계산
+  let sumCalculatedUsage = 0;
+  DEFAULT_UNITS.forEach(function(unit) {
+    const prev2Val = meterMap[unit + '_' + prev2YM];
+    const prevVal = meterMap[unit + '_' + prevYM];
+    if (prevVal !== undefined && prev2Val !== undefined) {
+      sumCalculatedUsage += Math.max(0, Math.round((prevVal - prev2Val) * 100) / 100);
+    }
+  });
+
+  // 고지서 사용량과 세대실측 합계의 오차량(톤) 및 오차납부금 총액 계산
+  let errorDiffUsage = 0;
+  let errorDiffFeeTotal = 0;
+  if (billing.totalUsage > sumCalculatedUsage && sumCalculatedUsage > 0) {
+    errorDiffUsage = Math.round((billing.totalUsage - sumCalculatedUsage) * 100) / 100;
+    errorDiffFeeTotal = Math.round(errorDiffUsage * unitPrice);
+  }
+
   // 세대별 정산 계산
   const settlements = [];
-  let sumCalculatedUsage = 0;
   let sumWaterFee = 0;
+  let sumErrorDiffFee = 0;
   let sumFinalTotal = 0;
 
   DEFAULT_UNITS.forEach(function(unit) {
@@ -550,11 +642,22 @@ function getSettlementData(yearMonth, targetUnit) {
       isComplete = true;
     }
 
+    // 기본 수도요금 = 사용량 × 단가 (예: 28톤 × 1,260원 = 35,280원)
     const waterFee = Math.round(usage * unitPrice);
-    const finalAmount = isComplete ? (waterFee + FIXED_WATER_FEE_PER_UNIT + commonElectricPerUnit) : 0;
 
-    sumCalculatedUsage += usage;
+    // 오차 납부금 (공용 오차 톤수 배분): 사용량 비율로 안분 (예: 10,502원)
+    let errorDiffFee = 0;
+    if (errorDiffFeeTotal > 0 && sumCalculatedUsage > 0 && isComplete) {
+      errorDiffFee = Math.round(errorDiffFeeTotal * (usage / sumCalculatedUsage));
+    }
+
+    // 최종 청구 합계 = 기본수도요금 + 정액료(219원) + 공용전기료(359원) + 오차납부금
+    const finalAmount = isComplete
+      ? (waterFee + FIXED_WATER_FEE_PER_UNIT + commonElectricPerUnit + errorDiffFee)
+      : 0;
+
     sumWaterFee += waterFee;
+    sumErrorDiffFee += errorDiffFee;
     sumFinalTotal += finalAmount;
 
     settlements.push({
@@ -570,12 +673,12 @@ function getSettlementData(yearMonth, targetUnit) {
       waterFee: waterFee,
       fixedFee: FIXED_WATER_FEE_PER_UNIT,
       commonElectricFee: commonElectricPerUnit,
+      errorDiffFee: errorDiffFee,
       finalAmount: finalAmount,
       isComplete: isComplete
     });
   });
 
-  // 단일 세대 조회인 경우 필터링
   let singleResult = null;
   if (targetUnit) {
     singleResult = settlements.find(function(s) {
@@ -597,6 +700,8 @@ function getSettlementData(yearMonth, targetUnit) {
     fixedFeeTotal: FIXED_WATER_FEE_TOTAL,
     fixedFeePerUnit: FIXED_WATER_FEE_PER_UNIT,
     commonElectricPerUnit: commonElectricPerUnit,
+    errorDiffUsage: errorDiffUsage,
+    errorDiffFeeTotal: errorDiffFeeTotal,
     settlements: settlements,
     singleResult: singleResult,
     summary: {
@@ -604,6 +709,7 @@ function getSettlementData(yearMonth, targetUnit) {
       completedUnits: settlements.filter(function(s) { return s.isComplete; }).length,
       sumUsage: Math.round(sumCalculatedUsage * 100) / 100,
       sumWaterFee: sumWaterFee,
+      sumErrorDiffFee: sumErrorDiffFee,
       sumFinalTotal: sumFinalTotal
     }
   };
@@ -676,7 +782,6 @@ function getMeterHistory(unit, limit) {
     }
   }
 
-  // 최신 연월순 정렬
   history.sort(function(a, b) {
     return b.yearMonth.localeCompare(a.yearMonth);
   });

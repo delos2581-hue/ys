@@ -405,6 +405,21 @@ export const ResidentView: React.FC<ResidentViewProps> = ({ user }) => {
                         </span>
                       </div>
 
+                      {/* 4. 오차 납부금 (고지서 톤수 오차가 있을 경우) */}
+                      {Boolean(single.errorDiffFee && single.errorDiffFee > 0) && (
+                        <div className="flex justify-between items-center py-1.5 px-2.5 bg-amber-50/80 rounded-xl border border-amber-200">
+                          <div>
+                            <span className="font-semibold text-amber-900">④ 공용 오차 톤수 배분액</span>
+                            <span className="text-amber-700 text-[11px] block">
+                              고지서 총사용량 오차({settlementData?.errorDiffUsage || 64}톤) 세대 실사용량 비율 안분
+                            </span>
+                          </div>
+                          <span className="font-bold text-amber-900">
+                            +{(single.errorDiffFee || 0).toLocaleString()} 원
+                          </span>
+                        </div>
+                      )}
+
                       {/* 최종 납부 금액 합계 */}
                       <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
                         <div>
@@ -412,7 +427,7 @@ export const ResidentView: React.FC<ResidentViewProps> = ({ user }) => {
                             {unit} 최종 납부 총액
                           </span>
                           <span className="text-[11px] text-slate-500 block">
-                            수도요금 + 정액료(219원) + 공용전기료
+                            수도요금 + 정액료(219원) + 공용전기료 {single.errorDiffFee ? '+ 오차납부금' : ''}
                           </span>
                         </div>
                         <div className="text-right">

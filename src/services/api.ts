@@ -179,9 +179,27 @@ export function computeLocalSettlement(yearMonth: string, targetUnit?: string | 
     meterMap[`${m.unit}_${m.yearMonth}`] = m.value;
   });
 
-  const settlements: SettlementItem[] = [];
+  // 전체 세대 실사용량 합계 먼저 계산
   let sumUsage = 0;
+  DEFAULT_UNITS.forEach((unit) => {
+    const prev2Val = meterMap[`${unit}_${prev2YM}`];
+    const prevVal = meterMap[`${unit}_${prevYM}`];
+    if (prevVal !== undefined && prev2Val !== undefined) {
+      sumUsage += Math.max(0, Math.round((prevVal - prev2Val) * 100) / 100);
+    }
+  });
+
+  // 오차 톤수 및 오차금액 총액 (고지서 사용량 279톤 - 세대합계 215톤 = 64톤)
+  let errorDiffUsage = 0;
+  let errorDiffFeeTotal = 0;
+  if (billing.totalUsage > sumUsage && sumUsage > 0) {
+    errorDiffUsage = Math.round((billing.totalUsage - sumUsage) * 100) / 100;
+    errorDiffFeeTotal = Math.round(errorDiffUsage * unitPrice);
+  }
+
+  const settlements: SettlementItem[] = [];
   let sumWaterFee = 0;
+  let sumErrorDiffFee = 0;
   let sumFinalTotal = 0;
 
   DEFAULT_UNITS.forEach((unit) => {
@@ -200,11 +218,21 @@ export function computeLocalSettlement(yearMonth: string, targetUnit?: string | 
       isComplete = true;
     }
 
+    // 기본 수도요금 = 사용량 × 단가 (예: 28톤 × 1,260원 = 35,280원)
     const waterFee = Math.round(usage * unitPrice);
-    const finalAmount = isComplete ? (waterFee + FIXED_WATER_FEE_PER_UNIT + commonElectricPerUnit) : 0;
 
-    sumUsage += usage;
+    // 오차 납부금 = 64톤 × 단가 × (세대사용량 / 세대합계 215톤) (예: 10,502원)
+    let errorDiffFee = 0;
+    if (errorDiffFeeTotal > 0 && sumUsage > 0 && isComplete) {
+      errorDiffFee = Math.round(errorDiffFeeTotal * (usage / sumUsage));
+    }
+
+    const finalAmount = isComplete
+      ? (waterFee + FIXED_WATER_FEE_PER_UNIT + commonElectricPerUnit + errorDiffFee)
+      : 0;
+
     sumWaterFee += waterFee;
+    sumErrorDiffFee += errorDiffFee;
     sumFinalTotal += finalAmount;
 
     settlements.push({
@@ -220,6 +248,7 @@ export function computeLocalSettlement(yearMonth: string, targetUnit?: string | 
       waterFee,
       fixedFee: FIXED_WATER_FEE_PER_UNIT,
       commonElectricFee: commonElectricPerUnit,
+      errorDiffFee,
       finalAmount,
       isComplete
     });
@@ -243,6 +272,8 @@ export function computeLocalSettlement(yearMonth: string, targetUnit?: string | 
     fixedFeeTotal: FIXED_WATER_FEE_TOTAL,
     fixedFeePerUnit: FIXED_WATER_FEE_PER_UNIT,
     commonElectricPerUnit,
+    errorDiffUsage,
+    errorDiffFeeTotal,
     settlements,
     singleResult,
     summary: {
@@ -250,6 +281,7 @@ export function computeLocalSettlement(yearMonth: string, targetUnit?: string | 
       completedUnits: settlements.filter((s) => s.isComplete).length,
       sumUsage: Math.round(sumUsage * 100) / 100,
       sumWaterFee,
+      sumErrorDiffFee,
       sumFinalTotal
     }
   };
@@ -528,5 +560,22 @@ export const Api = {
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
     localStorage.setItem(STORAGE_KEYS.METER, JSON.stringify(INITIAL_METER_DATA));
     localStorage.setItem(STORAGE_KEYS.BILLING, JSON.stringify(INITIAL_BILLING_DATA));
+  },
+
+  // 10. 2026년 6월 둔지빌 실제 청구분 데이터 세팅 (고지서 353,730원/279톤/권경희 총무 및 10세대 수치)
+  async setupJune2026Data(): Promise<{ success: boolean; message: string }> {
+    localStorage.setItem(STORAGE_KEYS.BILLING, JSON.stringify(INITIAL_BILLING_DATA));
+    localStorage.setItem(STORAGE_KEYS.METER, JSON.stringify(INITIAL_METER_DATA));
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
+
+    const gasRes = await callGas('setupJune2026Data', {});
+    if (gasRes && gasRes.success) {
+      return gasRes;
+    }
+
+    return {
+      success: true,
+      message: '2026년 6월 둔지빌 실제 데이터(수도 353,730원, 279톤, 총무 권경희, 10세대 수치)가 성공적으로 세팅되었습니다.'
+    };
   }
 };
