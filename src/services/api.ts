@@ -24,6 +24,10 @@ const FIXED_WATER_FEE_TOTAL = 2190;
 const TOTAL_UNITS = 10;
 const FIXED_WATER_FEE_PER_UNIT = 219;
 
+// 사용자 제공 Google Apps Script 웹 앱 배포 기본 주소
+export const DEFAULT_GAS_URL =
+  'https://script.google.com/macros/s/AKfycbzGa_QJIlIl7-Cc-nI8Zk4Xh0sf3MXgwn2870CX4Rtqbe0urH4vO3fM2wuNr4Hp3AyJHw/exec';
+
 // LocalStorage 초기화 및 헬퍼
 function getLocalUsers() {
   const raw = localStorage.getItem(STORAGE_KEYS.USERS);
@@ -78,12 +82,12 @@ function setLocalBillingData(data: BillingRecord[]) {
 
 export function getGasUrl(): string {
   const raw = localStorage.getItem(STORAGE_KEYS.CONFIG);
-  if (!raw) return '';
+  if (!raw) return DEFAULT_GAS_URL;
   try {
     const parsed = JSON.parse(raw);
-    return parsed.gasWebAppUrl || '';
+    return parsed.gasWebAppUrl || DEFAULT_GAS_URL;
   } catch {
-    return '';
+    return DEFAULT_GAS_URL;
   }
 }
 
@@ -99,6 +103,24 @@ export function setGasUrl(url: string) {
   }
   config.gasWebAppUrl = url.trim();
   localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(config));
+}
+
+// 가장 최근에 입력된 총무 정보 조회 (새 연월 작성 시 자동 계승용)
+export function getLatestManagerInfo(): { managerName: string; accountInfo: string } {
+  const billingList = getLocalBillingData();
+  const sorted = [...billingList].sort((a, b) => b.yearMonth.localeCompare(a.yearMonth));
+  for (const b of sorted) {
+    if (b.managerName && b.managerName.trim()) {
+      return {
+        managerName: b.managerName.trim(),
+        accountInfo: (b.accountInfo || '').trim()
+      };
+    }
+  }
+  return {
+    managerName: '203호 김총무',
+    accountInfo: '카카오뱅크 3333-12-8976543 (예금주: 김민수)'
+  };
 }
 
 // N개월 전 연월 계산
@@ -125,14 +147,22 @@ export function computeLocalSettlement(yearMonth: string, targetUnit?: string | 
   const prevYM = getPreviousYearMonth(yearMonth, 1);   // 지난달 (예: 2026-05)
   const prev2YM = getPreviousYearMonth(yearMonth, 2);  // 지지난달 (예: 2026-04)
 
-  const billing = billingList.find((b) => b.yearMonth === yearMonth) || {
-    yearMonth,
-    totalBill: 0,
-    totalUsage: 0,
-    commonElectric: 0,
-    managerName: '',
-    accountInfo: ''
-  };
+  const latestManager = getLatestManagerInfo();
+  const rawBilling = billingList.find((b) => b.yearMonth === yearMonth);
+  const billing: BillingRecord = rawBilling
+    ? {
+        ...rawBilling,
+        managerName: rawBilling.managerName || latestManager.managerName,
+        accountInfo: rawBilling.accountInfo || latestManager.accountInfo
+      }
+    : {
+        yearMonth,
+        totalBill: 0,
+        totalUsage: 0,
+        commonElectric: 0,
+        managerName: latestManager.managerName,
+        accountInfo: latestManager.accountInfo
+      };
 
   // 1톤당 단가 = (고지서 전체 수도요금 - 2,190원) / 고지서 전체 사용량(톤)
   let unitPrice = 0;
@@ -398,6 +428,48 @@ export const Api = {
     return {
       success: true,
       message: `${unit}의 ${yearMonth}월 검침 수치(${value})가 저장되었습니다.`
+    };
+  },
+
+  // 5-1. 10개 세대 계량기 수치 한꺼번에 일괄 저장 (총무 전용)
+  async saveBatchMeterValues(
+    yearMonth: string,
+    items: { unit: string; value: number }[]
+  ): Promise<{ success: boolean; message: string; count: number }> {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const updatedAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+    // 1) 로컬 스토리지 일괄 반영
+    const meterList = getLocalMeterData();
+    let updatedCount = 0;
+
+    items.forEach((item) => {
+      if (item.value === undefined || item.value === null || isNaN(item.value)) return;
+      const existingIndex = meterList.findIndex((m) => m.unit === item.unit && m.yearMonth === yearMonth);
+      if (existingIndex >= 0) {
+        meterList[existingIndex] = { unit: item.unit, yearMonth, value: item.value, updatedAt };
+      } else {
+        meterList.push({ unit: item.unit, yearMonth, value: item.value, updatedAt });
+      }
+      updatedCount++;
+    });
+    setLocalMeterData(meterList);
+
+    // 2) Google Apps Script 웹앱 일괄 저장 호출
+    const gasRes = await callGas('saveBatchMeterValues', { yearMonth, items });
+    if (gasRes && gasRes.success) {
+      return {
+        success: true,
+        count: updatedCount,
+        message: `${yearMonth}월 10개 세대 계량기 수치(${updatedCount}건)가 구글 시트에 일괄 저장되었습니다.`
+      };
+    }
+
+    return {
+      success: true,
+      count: updatedCount,
+      message: `${yearMonth}월 10개 세대 계량기 수치(${updatedCount}건)가 일괄 저장되었습니다.`
     };
   },
 

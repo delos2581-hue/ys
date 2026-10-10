@@ -156,6 +156,9 @@ function doPost(e) {
       case 'saveMeterValue':
         result = saveMeterValue(payload.unit, payload.yearMonth, payload.value);
         break;
+      case 'saveBatchMeterValues':
+        result = saveBatchMeterValues(payload.yearMonth, payload.items);
+        break;
       case 'saveBillingInfo':
         result = saveBillingInfo(
           payload.yearMonth,
@@ -333,6 +336,59 @@ function saveMeterValue(unit, yearMonth, value) {
     unit: formattedUnit,
     yearMonth: formattedYM,
     value: numValue,
+    updatedAt: updatedAt
+  };
+}
+
+/**
+ * 5-1. 10세대 계량기 수치 일괄 저장 (총무 전용 한꺼번에 입력 기능)
+ * items: [{ unit: '101호', value: 334.8 }, ...]
+ */
+function saveBatchMeterValues(yearMonth, items) {
+  if (!yearMonth || !items || !items.length) {
+    return { success: false, message: '연월과 저장할 세대 수치 목록이 필요합니다.' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('MeterData');
+  if (!sheet) {
+    sheet = ss.insertSheet('MeterData');
+    sheet.appendRow(['YearMonth', 'Unit', 'Value', 'UpdatedAt']);
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const formattedYM = String(yearMonth).trim();
+  const now = new Date();
+  const updatedAt = Utilities.formatDate(now, 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+
+  // 빠른 수정을 위한 맵 (unit => row index)
+  const existingRows = {};
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === formattedYM) {
+      existingRows[String(data[i][1]).trim()] = i + 1;
+    }
+  }
+
+  let updatedCount = 0;
+  items.forEach(function(item) {
+    if (!item.unit || item.value === undefined || item.value === null || item.value === '') return;
+    const numVal = Number(item.value);
+    if (isNaN(numVal) || numVal < 0) return;
+
+    const u = String(item.unit).trim();
+    if (existingRows[u]) {
+      sheet.getRange(existingRows[u], 3).setValue(numVal);
+      sheet.getRange(existingRows[u], 4).setValue(updatedAt);
+    } else {
+      sheet.appendRow([formattedYM, u, numVal, updatedAt]);
+    }
+    updatedCount++;
+  });
+
+  return {
+    success: true,
+    message: formattedYM + '월 ' + updatedCount + '개 세대 계량기 수치가 성공적으로 일괄 저장되었습니다.',
+    count: updatedCount,
     updatedAt: updatedAt
   };
 }

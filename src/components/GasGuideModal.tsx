@@ -94,6 +94,7 @@ function doPost(e) {
     else if (action === 'changePassword') result = changePassword(payload.id, payload.oldPassword, payload.newPassword);
     else if (action === 'resetUserPassword') result = resetUserPassword(payload.adminId, payload.adminPassword, payload.targetUnit);
     else if (action === 'saveMeterValue') result = saveMeterValue(payload.unit, payload.yearMonth, payload.value);
+    else if (action === 'saveBatchMeterValues') result = saveBatchMeterValues(payload.yearMonth, payload.items);
     else if (action === 'saveBillingInfo') result = saveBillingInfo(payload.yearMonth, payload.totalBill, payload.totalUsage, payload.commonElectric, payload.managerName, payload.accountInfo);
     else if (action === 'getSettlementData') result = getSettlementData(payload.yearMonth, payload.unit);
     else if (action === 'setupInitialSheets') result = setupInitialSheets();
@@ -168,6 +169,32 @@ function saveMeterValue(unit, yearMonth, value) {
     sheet.appendRow([ym, u, Number(value), now]);
   }
   return { success: true, message: u + ' 수치 저장 완료' };
+}
+
+function saveBatchMeterValues(yearMonth, items) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('MeterData') || ss.insertSheet('MeterData');
+  const data = sheet.getDataRange().getValues();
+  const ym = String(yearMonth).trim();
+  const now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
+  const existingRows = {};
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === ym) existingRows[String(data[i][1]).trim()] = i + 1;
+  }
+  let count = 0;
+  items.forEach(function(item) {
+    if (!item.unit || item.value === undefined || item.value === '' || isNaN(Number(item.value))) return;
+    const u = String(item.unit).trim();
+    const val = Number(item.value);
+    if (existingRows[u]) {
+      sheet.getRange(existingRows[u], 3).setValue(val);
+      sheet.getRange(existingRows[u], 4).setValue(now);
+    } else {
+      sheet.appendRow([ym, u, val, now]);
+    }
+    count++;
+  });
+  return { success: true, count: count, message: ym + '월 ' + count + '개 세대 수치 일괄 저장 완료' };
 }
 
 function saveBillingInfo(yearMonth, totalBill, totalUsage, commonElectric, managerName, accountInfo) {

@@ -16,9 +16,12 @@ import {
   UserCheck,
   Edit3,
   Layers,
-  ChevronDown
+  ChevronDown,
+  Gauge,
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
-import { Api, getPreviousYearMonth } from '../services/api';
+import { Api, getPreviousYearMonth, getLatestManagerInfo } from '../services/api';
 import { BillingRecord, SettlementData, SettlementItem, User } from '../types';
 import { DEFAULT_UNITS } from '../services/defaultData';
 
@@ -27,7 +30,7 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
-  const [activeTab, setActiveTab] = useState<'settlement' | 'billing' | 'password' | 'preview'>('settlement');
+  const [activeTab, setActiveTab] = useState<'settlement' | 'batchMeter' | 'billing' | 'password' | 'preview'>('settlement');
   const [selectedYM, setSelectedYM] = useState('2026-06');
   const [settlementData, setSettlementData] = useState<SettlementData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,6 +42,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
   const [managerName, setManagerName] = useState('203호 김총무');
   const [accountInfo, setAccountInfo] = useState('카카오뱅크 3333-12-8976543 (예금주: 김민수)');
   const [billingSaveMsg, setBillingSaveMsg] = useState<string | null>(null);
+
+  // 10세대 계량기 한꺼번에 입력 상태
+  const [batchYM, setBatchYM] = useState(() => getPreviousYearMonth('2026-06', 1)); // 기본 2026-05 (6월 청구 기준월)
+  const [batchValues, setBatchValues] = useState<Record<string, string>>({});
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchSaveMsg, setBatchSaveMsg] = useState<string | null>(null);
 
   // 대리 검침 입력 모달 상태
   const [editUnitModal, setEditUnitModal] = useState<string | null>(null);
@@ -56,6 +65,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
   // 세대별 영수증 미리보기용 호수
   const [previewUnit, setPreviewUnit] = useState('101호');
 
+  // 10세대 일괄 데이터 로드
+  const loadBatchMeterData = (targetYM: string) => {
+    const allRecords = Api.getMeterRecords();
+    const map: Record<string, string> = {};
+    DEFAULT_UNITS.forEach((unit) => {
+      const rec = allRecords.find((r) => r.unit === unit && r.yearMonth === targetYM);
+      map[unit] = rec ? String(rec.value) : '';
+    });
+    setBatchValues(map);
+  };
+
+  useEffect(() => {
+    loadBatchMeterData(batchYM);
+  }, [batchYM]);
+
   // 데이터 로드
   const loadSettlement = async (ym: string = selectedYM) => {
     setLoading(true);
@@ -66,8 +90,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
         setTotalBill(data.billing.totalBill || 0);
         setTotalUsage(data.billing.totalUsage || 0);
         setCommonElectric(data.billing.commonElectric || 0);
-        setManagerName(data.billing.managerName || '');
-        setAccountInfo(data.billing.accountInfo || '');
+
+        // 총무 정보: 해당 월에 이미 등록된 총무 정보가 있으면 그것을 유지/고정하고,
+        // 아직 비어있는 경우 가장 최근에 입력했던 총무 정보를 자동으로 계승 채움
+        const latest = getLatestManagerInfo();
+        setManagerName(data.billing.managerName || latest.managerName);
+        setAccountInfo(data.billing.accountInfo || latest.accountInfo);
       }
     } catch (err) {
       console.error(err);
@@ -80,7 +108,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
     loadSettlement(selectedYM);
   }, [selectedYM]);
 
-  // 고지서 정보 저장
+  // 고지서 정보 저장 (해당 청구월에 고정 저장됨)
   const handleSaveBilling = async (e: React.FormEvent) => {
     e.preventDefault();
     setBillingSaveMsg(null);
@@ -94,11 +122,40 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
         accountInfo: accountInfo.trim()
       };
       const res = await Api.saveBillingInfo(record);
-      setBillingSaveMsg(res.message);
+      setBillingSaveMsg(`${selectedYM}월 고지서와 총무 정보가 저장되어 이 달에 고정되었습니다.`);
       await loadSettlement(selectedYM);
-      setTimeout(() => setBillingSaveMsg(null), 3000);
+      setTimeout(() => setBillingSaveMsg(null), 3500);
     } catch {
       alert('고지서 정보 저장 중 오류가 발생했습니다.');
+    }
+  };
+
+  // 10세대 계량기 수치 한꺼번에 일괄 저장 핸들러
+  const handleSaveAllBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBatchLoading(true);
+    setBatchSaveMsg(null);
+    try {
+      const items = DEFAULT_UNITS.map((unit) => ({
+        unit,
+        value: batchValues[unit] !== undefined && batchValues[unit] !== '' ? parseFloat(batchValues[unit]) : NaN
+      })).filter((item) => !isNaN(item.value));
+
+      if (items.length === 0) {
+        alert('저장할 계량기 수치를 하나 이상 입력해주세요.');
+        setBatchLoading(false);
+        return;
+      }
+
+      const res = await Api.saveBatchMeterValues(batchYM, items);
+      setBatchSaveMsg(res.message);
+      await loadSettlement(selectedYM);
+      loadBatchMeterData(batchYM);
+      setTimeout(() => setBatchSaveMsg(null), 4000);
+    } catch {
+      alert('일괄 저장 중 오류가 발생했습니다.');
+    } finally {
+      setBatchLoading(false);
     }
   };
 
@@ -277,6 +334,24 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
         >
           <FileSpreadsheet className="w-4 h-4" />
           <span>전체 10세대 정산표</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('batchMeter');
+            loadBatchMeterData(batchYM);
+          }}
+          className={`px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-t-xl transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeTab === 'batchMeter'
+              ? 'bg-white text-blue-600 border-t border-x border-slate-200 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Gauge className="w-4 h-4 text-blue-600" />
+          <span className="font-bold">10세대 계량기 한꺼번에 입력</span>
+          <span className="text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded font-bold">
+            총무전용
+          </span>
         </button>
 
         <button
@@ -547,7 +622,204 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
         </div>
       )}
 
-      {/* 탭 2: 고지서 및 총무정보 입력/수정 */}
+      {/* 탭 2: 10세대 계량기 수치 한꺼번에 일괄 입력 (총무 전용) */}
+      {activeTab === 'batchMeter' && (
+        <div className="space-y-6">
+          {/* 상단 안내 & 연월 선택 바 */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                <Gauge className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <span>10세대 계량기 수치 한꺼번에 입력</span>
+                  <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
+                    구글 시트 실시간 일괄 저장
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  매월 5일 세대별 계량기를 순회 검침한 후, 10개 호수의 수치를 한 화면에서 순차 입력하고 [한 번에 일괄 저장]합니다.
+                </p>
+              </div>
+            </div>
+
+            {/* 검침 연월 선택기 */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-slate-700">검침 연월:</span>
+              <input
+                type="month"
+                value={batchYM}
+                onChange={(e) => setBatchYM(e.target.value)}
+                className="px-3 py-1.5 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setBatchYM(getPreviousYearMonth(selectedYM, 1))}
+                className="px-2.5 py-1 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+                title="선택된 고지서의 청구 기준 측정월로 설정"
+              >
+                청구 기준월({getPreviousYearMonth(selectedYM, 1)})
+              </button>
+              <button
+                type="button"
+                onClick={() => setBatchYM(selectedYM)}
+                className="px-2.5 py-1 text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg border border-slate-200 transition-colors cursor-pointer"
+              >
+                당월({selectedYM})
+              </button>
+            </div>
+          </div>
+
+          {/* 성공 메시지 */}
+          {batchSaveMsg && (
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs font-bold flex items-center gap-2.5 shadow-xs">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <span>{batchSaveMsg}</span>
+            </div>
+          )}
+
+          {/* 10세대 일괄 입력 폼 테이블 */}
+          <form onSubmit={handleSaveAllBatch} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-slate-600">
+                • <strong>{batchYM}월 5일 검침분</strong> 입력 중 (키보드 Tab 키로 다음 호수로 빠르게 이동 가능)
+              </div>
+              <div className="text-xs font-semibold text-slate-700 flex items-center gap-3">
+                <span>
+                  입력 완료:{' '}
+                  <strong className="text-blue-600">
+                    {DEFAULT_UNITS.filter((u) => batchValues[u] !== undefined && batchValues[u] !== '').length}
+                  </strong>{' '}
+                  / 10 세대
+                </span>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                  <tr>
+                    <th className="py-3 px-4 font-semibold w-24">호수</th>
+                    <th className="py-3 px-3 text-right font-semibold">
+                      직전달 ({getPreviousYearMonth(batchYM, 1)}) 수치
+                    </th>
+                    <th className="py-3 px-4 text-center font-bold text-blue-700 w-48">
+                      {batchYM}월 계량기 수치 (톤)
+                    </th>
+                    <th className="py-3 px-3 text-right font-semibold">
+                      증가 사용량 (톤)
+                    </th>
+                    <th className="py-3 px-3 text-center font-semibold w-24">
+                      상태
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {DEFAULT_UNITS.map((unit, index) => {
+                    const prevYM = getPreviousYearMonth(batchYM, 1);
+                    const allMeters = Api.getMeterRecords();
+                    const prevRec = allMeters.find((m) => m.unit === unit && m.yearMonth === prevYM);
+                    const prevVal = prevRec ? prevRec.value : null;
+
+                    const currentValStr = batchValues[unit] || '';
+                    const hasVal = currentValStr !== '' && !isNaN(Number(currentValStr));
+                    const currentNum = hasVal ? parseFloat(currentValStr) : null;
+                    const diff =
+                      currentNum !== null && prevVal !== null
+                        ? Math.max(0, Math.round((currentNum - prevVal) * 100) / 100)
+                        : null;
+
+                    return (
+                      <tr key={unit} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-4 font-bold text-slate-900 flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                          <span>{unit}</span>
+                        </td>
+
+                        <td className="py-3 px-3 text-right text-slate-600 font-medium">
+                          {prevVal !== null ? `${prevVal} 톤` : <span className="text-slate-400">기록없음</span>}
+                        </td>
+
+                        <td className="py-2.5 px-4 text-center">
+                          <div className="relative max-w-[170px] mx-auto">
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder={prevVal !== null ? String(prevVal) : '0.0'}
+                              value={currentValStr}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setBatchValues((prev) => ({ ...prev, [unit]: val }));
+                              }}
+                              className={`w-full px-3 py-1.5 text-sm font-bold text-center border rounded-xl outline-none transition-all ${
+                                hasVal
+                                  ? 'border-blue-400 bg-blue-50/40 text-blue-900 focus:ring-2 focus:ring-blue-500'
+                                  : 'border-slate-300 bg-white text-slate-700 focus:ring-2 focus:ring-blue-400'
+                              }`}
+                            />
+                            <span className="absolute right-2.5 top-2 text-[10px] text-slate-400 pointer-events-none">
+                              톤
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-bold">
+                          {diff !== null ? (
+                            <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                              +{diff.toFixed(2)} 톤
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-3 text-center">
+                          {hasVal ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md">
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              입력완료
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md">
+                              미입력
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 하단 일괄 저장 액션 바 */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs text-slate-600">
+                * 저장 시 구글 시트('MeterData' 탭) 및 로컬 데이터베이스에 10개 세대가 즉시 일괄 갱신됩니다.
+              </div>
+
+              <button
+                type="submit"
+                disabled={batchLoading}
+                className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {batchLoading ? (
+                  <span>구글 시트에 일괄 저장 중...</span>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>10개 세대 수치 한 번에 저장하기</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* 탭 3: 고지서 및 총무정보 입력/수정 */}
       {activeTab === 'billing' && (
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs max-w-2xl mx-auto">
           <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
@@ -641,9 +913,17 @@ export const AdminView: React.FC<AdminViewProps> = ({ user }) => {
             </div>
 
             <div className="pt-2 border-t border-slate-100">
-              <h4 className="text-xs font-bold text-slate-800 mb-2">
-                3개월 순환 총무 및 입금 계좌 정보
-              </h4>
+              <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                <h4 className="text-xs font-bold text-slate-800">
+                  3개월 순환 총무 및 입금 계좌 정보
+                </h4>
+                <span className="text-[11px] text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-semibold">
+                  최근 입력 정보 자동 유지 & 저장 시 {selectedYM}월에 고정
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mb-3">
+                💡 가장 최근에 입력한 총무 정보가 자동으로 불러와지며, [저장] 시 {selectedYM}월 고지서에 확정 고정되어 세대원 영수증에 표시됩니다.
+              </p>
 
               <div className="space-y-3">
                 <div>
